@@ -7,7 +7,7 @@ import Html.Events
 import Task
 import Time
 
-import TagTime exposing (Ping, isAfter)
+import TagTime exposing (Ping)
 
 type alias Model =
   { timeZone : Time.Zone
@@ -33,7 +33,7 @@ init () =
   , Cmd.batch
       [ Time.now
         |> Task.andThen
-          ( TagTime.lastBefore
+          ( TagTime.mostRecent
             >> TagTime.prev
             >> TagTime.prev
             >> TagTime.prev

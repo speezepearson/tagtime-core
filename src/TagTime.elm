@@ -8,22 +8,30 @@ This module is written in a less-than-maximally Elm-like style in order to stay 
 
 module TagTime exposing
   ( Ping
-  , firstAfter
-  , lastBefore
   , toTime
   , next
   , prev
-  , urPing
-  , meanGap
-  , advanceToLastBefore
-  , advanceToFirstAfter
-  , isAfter
+  , mostRecent
   , waitForPing
+  , meanGap
+  , urPing
   )
 
+import Dict exposing (Dict)
 import Process
 import Task exposing (Task)
 import Time
+
+
+type Ping = Ping
+  { meanGap : Int
+  , lastPingUnixTime : Int
+  , lcg : Lcg
+  }
+
+
+
+-- REFERENCE IMPLEMENTATION, APPROXIMATELY VERBATIM
 
 urPing : Ping
 urPing = Ping
@@ -64,18 +72,6 @@ nextGap mean lcg =
   in
     (max 1 (round eRand), newLcg)
 
-
-type Ping = Ping
-  { meanGap : Int
-  , lastPingUnixTime : Int
-  , lcg : Lcg
-  }
-
-toTime : Ping -> Time.Posix
-toTime (Ping {lastPingUnixTime}) =
-  Time.millisToPosix <| lastPingUnixTime * 1000
-
-
 next : Ping -> Ping
 next ping =
   let
@@ -86,13 +82,16 @@ next ping =
     Ping { internals | lcg = newLcg , lastPingUnixTime = resultUnixTime }
 
 
--- GOING BACKWARDS
 
-iaInv = 1407677000  -- Multiplicative inverse of ia; used to step backward.
+-- MUST-HAVE UTILITIES FOR MANIPULATING PINGS
 
-retreat : Lcg -> Lcg
-retreat (Lcg seed) =
-  Lcg <| mulModIm seed iaInv
+meanGap : Ping -> Int
+meanGap (Ping internals) =
+  internals.meanGap
+
+toTime : Ping -> Time.Posix
+toTime (Ping {lastPingUnixTime}) =
+  Time.millisToPosix <| lastPingUnixTime * 1000
 
 prev : Ping -> Ping
 prev ping =
@@ -104,55 +103,47 @@ prev ping =
   in
     Ping { internals | lcg = prevLcg , lastPingUnixTime = resultUnixTime }
 
--- equivalent of init() in the reference implementation
-advanceToLastBefore : Time.Posix -> Ping -> Ping
-advanceToLastBefore time ping =
+mostRecent : Time.Posix -> Ping
+mostRecent target =
   let
-    ping_ = next ping
+    step : Ping -> Ping
+    step =
+      if target |> isAfter (toTime urPing) then
+        next
+      else
+        prev
+
+    tailRecurse : Ping -> Ping
+    tailRecurse ping =
+      if (toTime (next ping) |> isAfter target) && not (toTime ping |> isAfter target) then
+        ping
+      else
+        tailRecurse (step ping)
   in
-    if toTime ping_ |> isAfter time then
-      ping
-    else
-      advanceToLastBefore time ping_
+    tailRecurse (closestCachedPingTo target)
 
-advanceToFirstAfter : Time.Posix -> Ping -> Ping
-advanceToFirstAfter t p =
-  advanceToLastBefore t p |> next
 
--- EXTRA FUNCTIONS FOR MANIPULATING PINGERS
+-- WAITING FOR PINGS
 
-meanGap : Ping -> Int
-meanGap (Ping internals) =
-  internals.meanGap
-
-lastBefore : Time.Posix -> Ping
-lastBefore time =
-  advanceToLastBefore time urPing
-
-firstAfter : Time.Posix -> Ping
-firstAfter time =
-  advanceToFirstAfter time urPing
-
-pingsUntil : Time.Posix -> Ping -> List Ping
-pingsUntil tf ping =
+waitForPing : Ping -> Task x Ping
+waitForPing prevPing =
   let
-    withAccumulator : List Ping -> Ping -> List Ping
-    withAccumulator res ping_ =
-      let
-        np = next ping_
-      in
-        if toTime np |> isAfter tf then
-          []
-        else
-          withAccumulator (np :: res) np
+    nextPing = next prevPing
   in
-    withAccumulator [] ping
-    |> List.reverse
+    Time.now
+    |> Task.andThen (\now ->
+        Process.sleep (toFloat <| millisBetween now (toTime nextPing))
+      )
+    |> Task.map (always nextPing)
 
 
+-- INTERNAL UTILITIES
 
--- UTILITIES
+iaInv = 1407677000  -- Multiplicative inverse of ia; used to step backward.
 
+retreat : Lcg -> Lcg
+retreat (Lcg seed) =
+  Lcg <| mulModIm seed iaInv
 
 -- Elm's Int arithmetic is quirky for numbers above 2^32.
 -- This means we can't use normal multiplication for elements of the modular field:
@@ -195,25 +186,63 @@ mulModIm =
   in
     tailRecurse 0
 
+
 isAfter : Time.Posix -> Time.Posix -> Bool
 isAfter t1 t2 =
   Time.posixToMillis t2 > Time.posixToMillis t1
 
-sleepUntil : Time.Posix -> Time.Posix -> Task x ()
-sleepUntil tf now =
-  Time.posixToMillis tf - Time.posixToMillis now
-  |> toFloat
-  |> Process.sleep
+millisBetween : Time.Posix -> Time.Posix -> Int
+millisBetween t0 tf =
+  Time.posixToMillis tf - Time.posixToMillis t0
 
-waitForPing : Ping -> Task x Ping
-waitForPing prevPing =
+
+closestCachedPingTo : Time.Posix -> Ping
+closestCachedPingTo =
   let
-    nextPing = next prevPing
+    cachedPings : Dict Int Ping
+    cachedPings =
+      Dict.fromList
+      <| List.map (\ping -> let (Ping {lastPingUnixTime}) = ping in (lastPingUnixTime, ping))
+      <|[ Ping { lastPingUnixTime = -2866, lcg = Lcg 2099573786, meanGap = 2700 } -- epoch
+        , urPing
+        , Ping { lastPingUnixTime = 1210798482, lcg = Lcg 146250425, meanGap = 2700 }
+        , Ping { lastPingUnixTime = 1265233028, lcg = Lcg 524132708, meanGap = 2700 }
+        , Ping { lastPingUnixTime = 1319301223, lcg = Lcg 1594955303, meanGap = 2700 }
+        , Ping { lastPingUnixTime = 1372711669, lcg = Lcg 1815482626, meanGap = 2700 }
+        , Ping { lastPingUnixTime = 1426730819, lcg = Lcg 604164177, meanGap = 2700 }
+        , Ping { lastPingUnixTime = 1480347960, lcg = Lcg 871999208, meanGap = 2700 }
+        , Ping { lastPingUnixTime = 1534182392, lcg = Lcg 1043395948, meanGap = 2700 }
+        , Ping { lastPingUnixTime = 1588379296, lcg = Lcg 1731503183, meanGap = 2700 } -- time of writing
+        , Ping { lastPingUnixTime = 1642674203, lcg = Lcg 75660533, meanGap = 2700 }
+        , Ping { lastPingUnixTime = 1696919026, lcg = Lcg 658414393, meanGap = 2700 }
+        , Ping { lastPingUnixTime = 1750366433, lcg = Lcg 358401311, meanGap = 2700 }
+        , Ping { lastPingUnixTime = 1804564790, lcg = Lcg 87431681, meanGap = 2700 }
+        , Ping { lastPingUnixTime = 1858581381, lcg = Lcg 2049909891, meanGap = 2700 }
+        , Ping { lastPingUnixTime = 1912691903, lcg = Lcg 1566488548, meanGap = 2700 }
+        , Ping { lastPingUnixTime = 1966908261, lcg = Lcg 252853066, meanGap = 2700 }
+        ]
   in
-    Time.now
-    |> Task.andThen (sleepUntil <| toTime nextPing)
-    |> Task.map (always nextPing)
+    (\target ->
+      let
+        targetUnixTime = Time.posixToMillis target // 1000
 
+        distance : Ping -> Int
+        distance ping =
+          let (Ping {lastPingUnixTime}) = ping in abs (lastPingUnixTime - targetUnixTime)
+
+        reduce : Int -> Ping -> (Int, Ping) -> (Int, Ping)
+        reduce millis ping (minDistance, winner) =
+          let
+            newDistance = distance ping
+          in
+            if newDistance < minDistance then
+              (newDistance, ping)
+            else
+              (minDistance, winner)
+      in
+        Dict.foldl reduce (targetUnixTime-1184097393, urPing) cachedPings
+        |> Tuple.second
+    )
 
 
 -- DEBUGGING STUFF THAT I SHOULD PACKAGE INTO TESTS
@@ -242,6 +271,6 @@ List.Extra.unfoldr
     , 1184105815
     ]
 
-(next <| advanceToLastBefore <| Time.millisToPosix 1184104776000) == Time.millisToPosix 1184105302000
+(next <| advanceUntil <| Time.millisToPosix 1184104776000) == Time.millisToPosix 1184105302000
 
 --}
