@@ -1,14 +1,16 @@
-module TagTime exposing (suite)
+module Tests exposing (..)
 
 import Expect exposing (Expectation)
-import Fuzz exposing (Fuzzer, int, list, string)
+import Fuzz exposing (intRange)
 import Test exposing (..)
 
 import Time
 
+import TagTime exposing (..)
+
 unixTime : Int -> Time.Posix
 unixTime seconds =
-  Time.millisToPosix <| t * 1000
+  Time.millisToPosix <| seconds * 1000
 
 toUnixTime : Ping -> Int
 toUnixTime ping =
@@ -25,7 +27,7 @@ prevNextTests =
   describe "prev/next"
     [ describe "smoke"
         [ test "next" <|
-            \_ -> Expect.equal (mostRecent <| unixTime 1533748817) (next <| mostRecent <| unixTime 1533748817)
+            \_ -> Expect.equal (mostRecent <| unixTime 1533754341) (next <| mostRecent <| unixTime 1533748817)
         ]
     , fuzz (intRange 1210798482 1588379296) "(prev << next) == identity" <|
         \n -> let ping = mostRecent (unixTime n) in
@@ -34,5 +36,5 @@ prevNextTests =
         \n -> let ping = mostRecent (unixTime n) in
           Expect.equal ping (next (prev ping))
     , test "can go before epoch" <|
-        \_ -> mostRecent (unixTime <| -100000)
+        \_ -> Expect.atMost -100000 (toUnixTime <| mostRecent <| unixTime -100000)
     ]

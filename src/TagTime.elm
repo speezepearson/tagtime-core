@@ -137,12 +137,14 @@ prev ping =
 mostRecent : Time.Posix -> Ping
 mostRecent target =
   let
+    start = closestCachedPingTo target
+
     step : Ping -> Ping
     step =
-      if target |> isAfter (toTime urPing) then
-        next
-      else
+      if toTime start |> isAfter target then
         prev
+      else
+        next
 
     tailRecurse : Ping -> Ping
     tailRecurse ping =
@@ -151,7 +153,7 @@ mostRecent target =
       else
         tailRecurse (step ping)
   in
-    tailRecurse (closestCachedPingTo target)
+    tailRecurse start
 
 
 -- WAITING FOR PINGS
