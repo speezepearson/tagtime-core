@@ -252,7 +252,7 @@ millisBetween t0 tf =
 
 
 closestCachedPingTo : Time.Posix -> Ping
-closestCachedPingTo =
+closestCachedPingTo target =
   let
     cachedPings : Dict Int Ping
     cachedPings =
@@ -276,25 +276,18 @@ closestCachedPingTo =
         , Ping { lastPingUnixTime = 1912691903, lcg = Lcg 1566488548, meanGap = 2700 }
         , Ping { lastPingUnixTime = 1966908261, lcg = Lcg 252853066, meanGap = 2700 }
         ]
+
+    targetUnixTime = Time.posixToMillis target // 1000
+
+    must : Maybe a -> a
+    must mx =
+      case mx of
+        Just x -> x
+        Nothing -> Debug.todo "impossible"
+
   in
-    (\target ->
-      let
-        targetUnixTime = Time.posixToMillis target // 1000
-
-        distance : Ping -> Int
-        distance ping =
-          let (Ping {lastPingUnixTime}) = ping in abs (lastPingUnixTime - targetUnixTime)
-
-        reduce : Int -> Ping -> (Int, Ping) -> (Int, Ping)
-        reduce millis ping (minDistance, winner) =
-          let
-            newDistance = distance ping
-          in
-            if newDistance < minDistance then
-              (newDistance, ping)
-            else
-              (minDistance, winner)
-      in
-        Dict.foldl reduce (targetUnixTime-1184097393, urPing) cachedPings
-        |> Tuple.second
-    )
+    Dict.keys cachedPings
+    |> List.map (\k -> (abs (k-targetUnixTime), k))
+    |> List.minimum
+    |> Maybe.andThen (\(_, k) -> Dict.get k cachedPings)
+    |> must
