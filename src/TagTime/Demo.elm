@@ -18,6 +18,9 @@ type Msg
   = SetZone Time.Zone
   | GotPing Ping
 
+waitForPingCmd : Cmd Msg
+waitForPingCmd = Task.perform GotPing TagTime.waitForPing
+
 main = Browser.element
   { init = init
   , view = view
@@ -31,15 +34,7 @@ init () =
     , pings = []
     }
   , Cmd.batch
-      [ Time.now
-        |> Task.andThen
-          ( TagTime.mostRecent
-            >> TagTime.prev
-            >> TagTime.prev
-            >> TagTime.prev
-            >> TagTime.waitForPing
-          )
-        |> Task.perform GotPing
+      [ waitForPingCmd
       , Task.perform SetZone Time.here
       ]
   )
@@ -47,7 +42,7 @@ init () =
 view : Model -> Html.Html Msg
 view {pings, timeZone} =
   Html.div []
-    [ Html.text "Recent pings:"
+    [ Html.text "Pings since you opened this page:"
     , pings
       |> List.map (TagTime.toTime >> localTimeString timeZone >> Html.text >> List.singleton >> Html.li [])
       |> Html.ul []
@@ -73,5 +68,5 @@ update msg model =
       ( { model
         | pings = ping :: model.pings
         }
-      , Task.perform GotPing <| TagTime.waitForPing ping
+      , waitForPingCmd
       )
