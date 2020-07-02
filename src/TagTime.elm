@@ -20,9 +20,6 @@ a uniformly-pseudorandomly-spaced set of points in time.
 # Waiting for pings
 @docs waitForPing
 
-# Rare helpers
-@docs meanGap
-
 # Reference implementation
 https://forum.beeminder.com/t/official-reference-implementation-of-the-tagtime-universal-ping-schedule/4282
 
